@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Face Classifier — Teachable Machine</title>
+  <meta name="description" content="Real-time face expression classifier using Google's Teachable Machine model. Detects Happy, Sad, and Neutral expressions via your webcam." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Background orbs -->
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+
+  <div class="app-wrapper">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-badge">
+        <span class="badge-dot"></span>
+        Teachable Machine
+      </div>
+      <h1 class="header-title">AI Face Classifier</h1>
+      <p class="header-subtitle">Real-time expression recognition powered by TensorFlow.js</p>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- Webcam Card -->
+      <section class="card webcam-card" id="webcamCard">
+        <div class="card-header">
+          <div class="card-icon">📷</div>
+          <div>
+            <h2 class="card-title">Live Camera Feed</h2>
+            <p class="card-subtitle">Position your face in the frame</p>
+          </div>
+          <div class="status-indicator" id="statusIndicator">
+            <span class="status-dot" id="statusDot"></span>
+            <span class="status-text" id="statusText">Offline</span>
+          </div>
+        </div>
+
+        <div class="webcam-viewport" id="webcamViewport">
+          <div class="webcam-overlay" id="webcamOverlay">
+            <div class="overlay-icon">🎭</div>
+            <p class="overlay-text">Camera not started</p>
+            <p class="overlay-hint">Click "Start Camera" below to begin</p>
+          </div>
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="canvas" style="display:none;"></canvas>
+          <div class="scan-ring" id="scanRing"></div>
+          <div class="corner-tl"></div>
+          <div class="corner-tr"></div>
+          <div class="corner-bl"></div>
+          <div class="corner-br"></div>
+        </div>
+
+        <div class="webcam-controls">
+          <button class="btn btn-primary" id="startBtn" onclick="startClassifier()">
+            <span class="btn-icon">▶</span>
+            Start Camera
+          </button>
+          <button class="btn btn-danger" id="stopBtn" onclick="stopClassifier()" disabled>
+            <span class="btn-icon">■</span>
+            Stop
+          </button>
+        </div>
+
+        <div class="error-banner" id="errorBanner" style="display:none;">
+          <span>⚠️</span>
+          <span id="errorText">Camera permission denied. Please allow camera access.</span>
+        </div>
+      </section>
+
+      <!-- Results Card -->
+      <section class="card results-card">
+        <div class="card-header">
+          <div class="card-icon">🧠</div>
+          <div>
+            <h2 class="card-title">AI Prediction</h2>
+            <p class="card-subtitle">Real-time classification results</p>
+          </div>
+        </div>
+
+        <!-- Top Prediction -->
+        <div class="top-prediction" id="topPrediction">
+          <div class="prediction-emoji" id="predictionEmoji">🤖</div>
+          <div class="prediction-details">
+            <p class="prediction-waiting">Waiting for camera…</p>
+            <p class="prediction-label" id="predictionLabel" style="display:none;"></p>
+            <p class="prediction-confidence" id="predictionConfidence" style="display:none;"></p>
+          </div>
+        </div>
+
+        <!-- Confidence Bars -->
+        <div class="confidence-section">
+          <h3 class="section-title">Confidence Scores</h3>
+          <div class="confidence-bars" id="confidenceBars">
+
+            <div class="confidence-item" id="bar-happy">
+              <div class="confidence-label">
+                <span class="conf-emoji">😄</span>
+                <span class="conf-name">Happy Face</span>
+                <span class="conf-value" id="val-happy">0%</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill bar-happy" id="fill-happy"></div>
+              </div>
+            </div>
+
+            <div class="confidence-item" id="bar-sad">
+              <div class="confidence-label">
+                <span class="conf-emoji">😢</span>
+                <span class="conf-name">Sad Face</span>
+                <span class="conf-value" id="val-sad">0%</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill bar-sad" id="fill-sad"></div>
+              </div>
+            </div>
+
+            <div class="confidence-item" id="bar-neutral">
+              <div class="confidence-label">
+                <span class="conf-emoji">😐</span>
+                <span class="conf-name">Neutral</span>
+                <span class="conf-value" id="val-neutral">0%</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill bar-neutral" id="fill-neutral"></div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Info Section -->
+        <div class="info-section">
+          <div class="info-item">
+            <span class="info-icon">⚡</span>
+            <div>
+              <p class="info-label">Model</p>
+              <p class="info-value">Teachable Machine v2</p>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">🔬</span>
+            <div>
+              <p class="info-label">Engine</p>
+              <p class="info-value">TensorFlow.js</p>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">🎯</span>
+            <div>
+              <p class="info-label">Classes</p>
+              <p class="info-value">3 Expressions</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- How It Works -->
+    <section class="how-it-works">
+      <h2 class="section-heading">How It Works</h2>
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-number">01</div>
+          <div class="step-icon">📸</div>
+          <h3>Capture Frame</h3>
+          <p>Every animation frame, your webcam feed is drawn onto a hidden canvas element.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">02</div>
+          <div class="step-icon">🧠</div>
+          <h3>Run Inference</h3>
+          <p>The Teachable Machine model processes the image using MobileNet feature extraction.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">03</div>
+          <div class="step-icon">📊</div>
+          <h3>Get Results</h3>
+          <p>The model outputs a probability for each class — Happy, Sad, or Neutral.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">04</div>
+          <div class="step-icon">✨</div>
+          <h3>Display Prediction</h3>
+          <p>The highest-confidence class is shown as the current prediction with live bars.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>Built with <span class="heart">♥</span> using Google Teachable Machine &amp; TensorFlow.js</p>
+      <p class="footer-sub">made by Gotam Dulhani</p>
+    </footer>
+
+  </div>
+
+  <!-- TensorFlow.js and Teachable Machine -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
