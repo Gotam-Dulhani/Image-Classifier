@@ -8,8 +8,6 @@
 
 > Classify live webcam images as **😄 Happy**, **😢 Sad**, or **😐 Neutral** using Google's Teachable Machine model and TensorFlow.js — entirely in the browser, no installation required.
 
-🌐 **[Explore the docs »](#)**
-🚀 **[View Demo](#)** · 🐛 **[Report Bug](#)** · 🌟 **[Request Feature](#)**
 
 ---
 
