@@ -1,13 +1,3 @@
-/**
- * AI Face Classifier — Teachable Machine Integration
- * Classifies live webcam frames as Happy Face, Sad Face, or Neutral
- * using Google's Teachable Machine image model + TensorFlow.js
- */
-
-// ─── Configuration ─────────────────────────────────────────────────────────
-
-// Teachable Machine: Face Expression demo model (publicly hosted)
-// This is Google's official demo face-expression model
 const MODEL_URL      = "https://teachablemachine.withgoogle.com/models/bXy2kDNi/";
 
 // Label → UI mapping
@@ -266,7 +256,7 @@ function stopClassifier() {
   // Reset viewport
   $overlay.style.display = "flex";
   $overlay.querySelector(".overlay-text").textContent  = "Camera stopped";
-  $overlay.querySelector(".overlay-hint").textContent  = "Click "Start Camera" to begin again";
+  $overlay.querySelector(".overlay-hint").textContent  = 'Click "Start Camera" to begin again';
   $scanRing.classList.remove("active");
   $webcamViewport.classList.remove("active");
   setStatus("offline", "Offline");
