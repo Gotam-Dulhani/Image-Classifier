@@ -1,308 +1,342 @@
-const MODEL_URL      = "https://teachablemachine.withgoogle.com/models/bXy2kDNi/";
+const MODEL_URL = "https://teachablemachine.withgoogle.com/models/MiDpAbMBO/"; // Ensure trailing slash or handle in code
 
-// Label → UI mapping
-const LABEL_MAP = {
-  "Happy":   { key: "happy",   emoji: "😄", cssClass: "happy"   },
-  "Sad":     { key: "sad",     emoji: "😢", cssClass: "sad"     },
-  "Neutral": { key: "neutral", emoji: "😐", cssClass: "neutral" },
-};
+// Emoji and color palette assigned dynamically per label
+const PALETTE = [
+  { color: "#22c55e", glow: "rgba(34,197,94,0.4)",  bg: "rgba(34,197,94,0.07)"  },
+  { color: "#f43f5e", glow: "rgba(244,63,94,0.4)",  bg: "rgba(244,63,94,0.07)"  },
+  { color: "#38bdf8", glow: "rgba(56,189,248,0.4)", bg: "rgba(56,189,248,0.07)" },
+  { color: "#f59e0b", glow: "rgba(245,158,11,0.4)", bg: "rgba(245,158,11,0.07)" },
+  { color: "#a78bfa", glow: "rgba(167,139,250,0.4)",bg: "rgba(167,139,250,0.07)"},
+];
 
-// Fallback display names if model uses different casing
-const LABEL_ALIASES = {
-  "happy face": "Happy",
-  "sad face":   "Sad",
-  "neutral":    "Neutral",
-  "happy":      "Happy",
-  "sad":        "Sad",
-};
+// Emojis used for the top-prediction display, ordered by label index
+const AUTO_EMOJIS = ["😄", "😢", "😐", "😮", "😡", "🤩", "😴", "😎"];
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── State ───────────────────────────────────────────────────────────────────
+let model       = null;
+let labelKeys   = [];      // label names from model
+let activeMode  = "upload"; // "upload" | "webcam"
 
-let model         = null;
-let webcamStream  = null;
-let rafId         = null;        // requestAnimationFrame ID
-let isRunning     = false;
-let labelKeys     = [];          // labels as returned by the model
+// Webcam state
+let webcamStream = null;
+let rafId        = null;
+let isRunning    = false;
 
-// ─── DOM Refs ───────────────────────────────────────────────────────────────
+// ─── DOM Refs ────────────────────────────────────────────────────────────────
+const $statusIndicator = document.getElementById("statusIndicator");
+const $statusText      = document.getElementById("statusText");
+const $errorBanner     = document.getElementById("errorBanner");
+const $errorText       = document.getElementById("errorText");
+const $topPrediction   = document.getElementById("topPrediction");
+const $predictionEmoji = document.getElementById("predictionEmoji");
+const $predictionLabel = document.getElementById("predictionLabel");
+const $predictionConf  = document.getElementById("predictionConfidence");
+const $predWaiting     = document.getElementById("predictionWaiting");
+const $confBars        = document.getElementById("confidenceBars");
 
-const $video            = document.getElementById("webcam");
-const $canvas           = document.getElementById("canvas");
-const $overlay          = document.getElementById("webcamOverlay");
-const $scanRing         = document.getElementById("scanRing");
-const $webcamViewport   = document.getElementById("webcamViewport");
-const $startBtn         = document.getElementById("startBtn");
-const $stopBtn          = document.getElementById("stopBtn");
-const $statusIndicator  = document.getElementById("statusIndicator");
-const $statusText       = document.getElementById("statusText");
-const $statusDot        = document.getElementById("statusDot");
-const $errorBanner      = document.getElementById("errorBanner");
-const $errorText        = document.getElementById("errorText");
-const $topPrediction    = document.getElementById("topPrediction");
-const $predictionEmoji  = document.getElementById("predictionEmoji");
-const $predictionLabel  = document.getElementById("predictionLabel");
-const $predictionConf   = document.getElementById("predictionConfidence");
-const $predictionWaiting = $topPrediction.querySelector(".prediction-waiting");
+// Upload mode
+const $uploadCard    = document.getElementById("uploadCard");
+const $dropZone      = document.getElementById("dropZone");
+const $fileInput     = document.getElementById("fileInput");
+const $previewWrap   = document.getElementById("previewWrap");
+const $previewImg    = document.getElementById("previewImg");
+const $classifyBtn   = document.getElementById("classifyBtn");
+const $resetBtn      = document.getElementById("resetBtn");
 
-// ─── Utility Helpers ────────────────────────────────────────────────────────
+// Webcam mode
+const $webcamCard    = document.getElementById("webcamCard");
+const $video         = document.getElementById("webcam");
+const $canvas        = document.getElementById("canvas");
+const $webcamOverlay = document.getElementById("webcamOverlay");
+const $scanRing      = document.getElementById("scanRing");
+const $webcamViewport= document.getElementById("webcamViewport");
+const $startBtn      = document.getElementById("startBtn");
+const $stopBtn       = document.getElementById("stopBtn");
 
-/**
- * Normalises a raw model label to a canonical key (Happy / Sad / Neutral).
- * Falls back to the raw label if not found in the alias map.
- */
-function normaliseLabel(raw) {
-  return LABEL_ALIASES[raw.toLowerCase().trim()] || raw;
-}
+// Tabs
+const $tabUpload = document.getElementById("tabUpload");
+const $tabWebcam = document.getElementById("tabWebcam");
 
-/**
- * Sets the status pill text + CSS state class.
- * @param {"offline"|"loading"|"active"} state
- * @param {string} text
- */
+// ─── Utility ─────────────────────────────────────────────────────────────────
 function setStatus(state, text) {
   $statusIndicator.className = `status-indicator ${state}`;
   $statusText.textContent = text;
 }
+function showError(msg) { $errorText.textContent = msg; $errorBanner.style.display = "flex"; }
+function hideError()    { $errorBanner.style.display = "none"; }
 
-/** Show an error message in the red banner. */
-function showError(msg) {
-  $errorText.textContent = msg;
-  $errorBanner.style.display = "flex";
-}
-function hideError() {
-  $errorBanner.style.display = "none";
-}
-
-// ─── Model Loading ───────────────────────────────────────────────────────────
-
-/**
- * Loads the Teachable Machine model from the CDN URL.
- * Uses the `tmImage` global injected by @teachablemachine/image CDN script.
- */
+// ─── Model Loading ────────────────────────────────────────────────────────────
 async function loadModel() {
-  setStatus("loading", "Loading…");
-  $startBtn.innerHTML = `<span class="spinner"></span> Loading…`;
-  $startBtn.disabled = true;
+  if (model) return true;
+  setStatus("loading", "Loading model…");
+
+  // Ensure MODEL_URL has a trailing slash for consistent concatenation
+  const baseUrl = MODEL_URL.endsWith("/") ? MODEL_URL : MODEL_URL + "/";
 
   try {
-    const modelURL    = MODEL_URL + "model.json";
-    const metaURL     = MODEL_URL + "metadata.json";
-    model = await tmImage.load(modelURL, metaURL);
+    // Check if we are on file:// protocol, which often restricts fetches
+    if (window.location.protocol === "file:") {
+      console.warn("⚠️ Running from file:// protocol may cause CORS errors with Teachable Machine models.");
+    }
+
+    model = await tmImage.load(baseUrl + "model.json", baseUrl + "metadata.json");
     labelKeys = model.getClassLabels();
     console.log("✅ Model loaded. Labels:", labelKeys);
+    buildConfidenceBars();
+    setStatus("offline", "Ready");
     return true;
   } catch (err) {
     console.error("❌ Model load error:", err);
-    showError("Failed to load model. Check your internet connection and try again.");
-    setStatus("offline", "Offline");
-    resetStartButton();
+    
+    let errorMsg = "Failed to load model.";
+    if (window.location.protocol === "file:") {
+      errorMsg += " (CORS error suspected). Please run this using a local server (like VS Code Live Server).";
+    } else {
+      errorMsg += " " + (err.message || "Check your internet connection.");
+    }
+    
+    showError(errorMsg);
+    setStatus("offline", "Error");
     return false;
   }
 }
 
-// ─── Webcam ──────────────────────────────────────────────────────────────────
+// ─── Dynamic Confidence Bars ──────────────────────────────────────────────────
+function buildConfidenceBars() {
+  $confBars.innerHTML = "";
+  labelKeys.forEach((label, i) => {
+    const palette = PALETTE[i % PALETTE.length];
+    const id      = `bar-${i}`;
+    const div = document.createElement("div");
+    div.className = "confidence-item";
+    div.id        = id;
+    div.innerHTML = `
+      <div class="confidence-label">
+        <span class="conf-emoji">${AUTO_EMOJIS[i] || "🔘"}</span>
+        <span class="conf-name">${label}</span>
+        <span class="conf-value" id="val-${i}">0%</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" id="fill-${i}" style="background:linear-gradient(90deg,${palette.color}99,${palette.color});box-shadow:0 0 12px ${palette.glow}"></div>
+      </div>`;
+    $confBars.appendChild(div);
+  });
+}
 
-/** Requests webcam access and starts the video stream. */
-async function startWebcam() {
+function updateUI(predictions) {
+  if (!predictions || predictions.length === 0) return;
+
+  const sorted  = [...predictions].sort((a, b) => b.probability - a.probability);
+  const top     = sorted[0];
+  const topIdx  = labelKeys.indexOf(top.className);
+  const topConf = (top.probability * 100).toFixed(1);
+  const palette = PALETTE[topIdx % PALETTE.length];
+
+  // Top prediction card
+  $predWaiting.style.display = "none";
+  $predictionLabel.style.display = "block";
+  $predictionConf.style.display  = "block";
+
+  $predictionEmoji.textContent = AUTO_EMOJIS[topIdx] || "🤖";
+  $predictionLabel.textContent = top.className;
+  $predictionLabel.style.color = palette.color;
+  $topPrediction.style.borderColor = palette.glow;
+  $topPrediction.style.background  = palette.bg;
+  $predictionConf.textContent = `${topConf}% confidence`;
+
+  // Update confidence bars
+  predictions.forEach((pred) => {
+    const idx  = labelKeys.indexOf(pred.className);
+    if (idx < 0) return;
+    const pct  = (pred.probability * 100).toFixed(1);
+    const isTop = pred.className === top.className;
+    const $fill = document.getElementById(`fill-${idx}`);
+    const $val  = document.getElementById(`val-${idx}`);
+    const $item = document.getElementById(`bar-${idx}`);
+    if ($fill) $fill.style.width = `${pct}%`;
+    if ($val)  $val.textContent  = `${pct}%`;
+    if ($item) $item.classList.toggle("active", isTop);
+  });
+}
+
+function resetResults() {
+  $predictionEmoji.textContent       = "🤖";
+  $predWaiting.style.display         = "block";
+  $predictionLabel.style.display     = "none";
+  $predictionConf.style.display      = "none";
+  $topPrediction.style.borderColor   = "";
+  $topPrediction.style.background    = "";
+
+  labelKeys.forEach((_, i) => {
+    const $fill = document.getElementById(`fill-${i}`);
+    const $val  = document.getElementById(`val-${i}`);
+    const $item = document.getElementById(`bar-${i}`);
+    if ($fill) $fill.style.width = "0%";
+    if ($val)  $val.textContent  = "0%";
+    if ($item) $item.classList.remove("active");
+  });
+}
+
+// ─── Upload Mode ─────────────────────────────────────────────────────────────
+function setupUploadMode() {
+  // Drag and drop
+  $dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    $dropZone.classList.add("drag-over");
+  });
+  $dropZone.addEventListener("dragleave", () => $dropZone.classList.remove("drag-over"));
+  $dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    $dropZone.classList.remove("drag-over");
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) showPreview(file);
+  });
+
+  // Click to browse
+  $dropZone.addEventListener("click", () => $fileInput.click());
+  $fileInput.addEventListener("change", () => {
+    if ($fileInput.files[0]) showPreview($fileInput.files[0]);
+  });
+
+  // Classify button
+  $classifyBtn.addEventListener("click", classifyUpload);
+
+  // Reset
+  $resetBtn.addEventListener("click", resetUpload);
+}
+
+function showPreview(file) {
+  const url = URL.createObjectURL(file);
+  $previewImg.src = url;
+  $previewWrap.style.display = "block";
+  $dropZone.style.display    = "none";
+  $classifyBtn.disabled      = false;
+  resetResults();
+  hideError();
+}
+
+function resetUpload() {
+  $previewWrap.style.display = "none";
+  $dropZone.style.display    = "flex";
+  $classifyBtn.disabled      = true;
+  $fileInput.value           = "";
+  resetResults();
+}
+
+async function classifyUpload() {
+  hideError();
+  const ok = await loadModel();
+  if (!ok) return;
+
+  $classifyBtn.innerHTML = `<span class="spinner"></span> Analyzing…`;
+  $classifyBtn.disabled  = true;
+
+  try {
+    const predictions = await model.predict($previewImg);
+    updateUI(predictions);
+    setStatus("active", "Done!");
+    setTimeout(() => setStatus("offline", "Ready"), 2000);
+  } catch (err) {
+    showError("Classification failed: " + err.message);
+  } finally {
+    $classifyBtn.innerHTML = `<span class="btn-icon">✨</span> Classify Image`;
+    $classifyBtn.disabled  = false;
+  }
+}
+
+// ─── Webcam Mode ─────────────────────────────────────────────────────────────
+async function startClassifier() {
+  hideError();
+  const ok = await loadModel();
+  if (!ok) return;
+
   try {
     webcamStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
     });
     $video.srcObject = webcamStream;
-    await new Promise((resolve) => { $video.onloadedmetadata = resolve; });
+    await new Promise((r) => { $video.onloadedmetadata = r; });
     $video.style.display = "block";
     $canvas.width  = $video.videoWidth  || 640;
     $canvas.height = $video.videoHeight || 480;
-    return true;
   } catch (err) {
-    if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-      showError("🚫 Camera permission denied. Please allow camera access and try again.");
-    } else if (err.name === "NotFoundError") {
-      showError("📷 No camera found. Please connect a webcam and try again.");
-    } else {
-      showError(`Camera error: ${err.message}`);
-    }
-    return false;
+    const msg = err.name === "NotAllowedError" ? "🚫 Camera permission denied."
+              : err.name === "NotFoundError"   ? "📷 No camera found."
+              : `Camera error: ${err.message}`;
+    showError(msg);
+    return;
   }
+
+  isRunning = true;
+  $webcamOverlay.style.display = "none";
+  $scanRing.classList.add("active");
+  $webcamViewport.classList.add("active");
+  setStatus("active", "Analyzing…");
+  $startBtn.disabled = true;
+  $stopBtn.disabled  = false;
+  rafId = requestAnimationFrame(classifyFrame);
 }
 
-/** Stops the webcam stream and releases the device. */
-function stopWebcam() {
-  if (webcamStream) {
-    webcamStream.getTracks().forEach((t) => t.stop());
-    webcamStream = null;
-  }
-  $video.srcObject = null;
-  $video.style.display = "none";
-}
-
-// ─── Classification Loop ──────────────────────────────────────────────────────
-
-/** Captures a frame from the video element and runs model prediction. */
 async function classifyFrame() {
   if (!isRunning || !model) return;
-
   const ctx = $canvas.getContext("2d");
   ctx.drawImage($video, 0, 0, $canvas.width, $canvas.height);
-
   try {
     const predictions = await model.predict($canvas);
     updateUI(predictions);
   } catch (err) {
-    console.warn("Prediction error (skipping frame):", err);
+    console.warn("Frame skip:", err);
   }
-
   rafId = requestAnimationFrame(classifyFrame);
 }
 
-/**
- * Updates all UI elements with fresh prediction data.
- * @param {Array<{className: string, probability: number}>} predictions
- */
-function updateUI(predictions) {
-  if (!predictions || predictions.length === 0) return;
-
-  // Sort by probability to find the top prediction
-  const sorted = [...predictions].sort((a, b) => b.probability - a.probability);
-  const top    = sorted[0];
-  const topLabel = normaliseLabel(top.className);
-  const topConf  = (top.probability * 100).toFixed(1);
-  const mapped   = LABEL_MAP[topLabel];
-
-  // Top prediction box
-  $predictionWaiting.style.display = "none";
-  $predictionLabel.style.display   = "block";
-  $predictionConf.style.display    = "block";
-
-  if (mapped) {
-    $predictionEmoji.textContent = mapped.emoji;
-    $predictionLabel.textContent = topLabel === "Happy" ? "Happy Face 😄"
-                                 : topLabel === "Sad"   ? "Sad Face 😢"
-                                 :                        "Neutral 😐";
-    $predictionLabel.className = `prediction-label ${mapped.cssClass}`;
-    $topPrediction.className   = `top-prediction ${mapped.cssClass}`;
-  } else {
-    $predictionEmoji.textContent = "🤖";
-    $predictionLabel.textContent = topLabel;
-    $predictionLabel.className   = "prediction-label";
-    $topPrediction.className     = "top-prediction";
-  }
-  $predictionConf.textContent = `${topConf}% confidence`;
-
-  // Update each confidence bar
-  predictions.forEach((pred) => {
-    const label  = normaliseLabel(pred.className);
-    const info   = LABEL_MAP[label];
-    if (!info) return;
-
-    const pct   = (pred.probability * 100).toFixed(1);
-    const isTop = label === topLabel;
-
-    const $fill = document.getElementById(`fill-${info.key}`);
-    const $val  = document.getElementById(`val-${info.key}`);
-    const $item = document.getElementById(`bar-${info.key}`);
-
-    if ($fill) $fill.style.width = `${pct}%`;
-    if ($val)  $val.textContent  = `${pct}%`;
-    if ($item) {
-      $item.classList.toggle("active", isTop);
-    }
-  });
-}
-
-// ─── Public Controls ─────────────────────────────────────────────────────────
-
-/** Called by the "Start Camera" button. Loads model + webcam then starts classifying. */
-async function startClassifier() {
-  hideError();
-
-  // Load model only once
-  if (!model) {
-    const ok = await loadModel();
-    if (!ok) return;
-  }
-
-  // Start webcam
-  const camOk = await startWebcam();
-  if (!camOk) {
-    resetStartButton();
-    return;
-  }
-
-  // Activate UI
-  isRunning = true;
-  $overlay.style.display = "none";
-  $scanRing.classList.add("active");
-  $webcamViewport.classList.add("active");
-  setStatus("active", "Analyzing…");
-
-  $startBtn.disabled = true;
-  $startBtn.innerHTML = `<span class="btn-icon">▶</span> Start Camera`;
-  $stopBtn.disabled = false;
-
-  // Begin classification loop
-  rafId = requestAnimationFrame(classifyFrame);
-}
-
-/** Called by the "Stop" button. Halts the classification loop and releases camera. */
 function stopClassifier() {
   isRunning = false;
-
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-
-  stopWebcam();
-
-  // Reset viewport
-  $overlay.style.display = "flex";
-  $overlay.querySelector(".overlay-text").textContent  = "Camera stopped";
-  $overlay.querySelector(".overlay-hint").textContent  = 'Click "Start Camera" to begin again';
+  if (webcamStream) { webcamStream.getTracks().forEach((t) => t.stop()); webcamStream = null; }
+  $video.srcObject = null;
+  $video.style.display = "none";
+  $webcamOverlay.style.display = "flex";
+  $webcamOverlay.querySelector(".overlay-text").textContent = "Camera stopped";
+  $webcamOverlay.querySelector(".overlay-hint").textContent = 'Click "Start Camera" to begin again';
   $scanRing.classList.remove("active");
   $webcamViewport.classList.remove("active");
-  setStatus("offline", "Offline");
-
-  // Reset prediction box
-  $predictionEmoji.textContent        = "🤖";
-  $predictionWaiting.style.display    = "block";
-  $predictionLabel.style.display      = "none";
-  $predictionConf.style.display       = "none";
-  $topPrediction.className            = "top-prediction";
-
-  // Reset bars to 0
-  ["happy", "sad", "neutral"].forEach((key) => {
-    const $fill = document.getElementById(`fill-${key}`);
-    const $val  = document.getElementById(`val-${key}`);
-    const $item = document.getElementById(`bar-${key}`);
-    if ($fill) $fill.style.width = "0%";
-    if ($val)  $val.textContent  = "0%";
-    if ($item) $item.classList.remove("active");
-  });
-
+  setStatus("offline", "Ready");
   $startBtn.disabled = false;
   $stopBtn.disabled  = true;
+  resetResults();
 }
 
-/** Resets the start button to its initial state (used on error). */
-function resetStartButton() {
-  $startBtn.innerHTML = `<span class="btn-icon">▶</span> Start Camera`;
-  $startBtn.disabled  = false;
+// ─── Tab Switching ────────────────────────────────────────────────────────────
+function switchTab(mode) {
+  activeMode = mode;
+  if (mode === "upload") {
+    $tabUpload.classList.add("active");
+    $tabWebcam.classList.remove("active");
+    $uploadCard.style.display = "block";
+    $webcamCard.style.display = "none";
+    if (isRunning) stopClassifier();
+  } else {
+    $tabWebcam.classList.add("active");
+    $tabUpload.classList.remove("active");
+    $webcamCard.style.display = "block";
+    $uploadCard.style.display = "none";
+    resetUpload();
+  }
+  resetResults();
+  hideError();
 }
 
-// ─── Lifecycle ────────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────────
+setupUploadMode();
+switchTab("upload"); // default mode
 
-// Safety: release webcam when user closes/refreshes the tab
-window.addEventListener("beforeunload", () => {
-  if (isRunning) stopClassifier();
-});
+window.addEventListener("beforeunload", () => { if (isRunning) stopClassifier(); });
 
-// Detect missing getUserMedia support (very old browsers / no HTTPS)
 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-  showError(
-    "Your browser does not support webcam access. " +
-    "Please use Chrome or Edge. If you opened this as a file://, " +
-    "serve it with: npx serve ."
-  );
-  $startBtn.disabled = true;
+  document.getElementById("tabWebcam").disabled = true;
+  document.getElementById("tabWebcam").title    = "Webcam not supported in this browser";
 }
 
-console.log("🎭 AI Face Classifier ready. Click 'Start Camera' to begin.");
+console.log("🎭 AI Image Classifier ready. Upload an image or use webcam.");
